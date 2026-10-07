@@ -7,6 +7,7 @@ import time
 import torch
 from torch.utils.data import Dataset
 from pile_wm.sim import PileSim, State, render
+from pile_wm.sim.environment import SIMULATOR_VERSION
 
 
 def split_ids(count, seed):
@@ -24,6 +25,8 @@ def split_ids(count, seed):
 def generate(config, device, destination=None):
     root = Path(destination or Path(config.output)/"data")
     root.mkdir(parents=True, exist_ok=True)
+    # An interrupted regeneration must not expose a mixed dataset as complete.
+    (root/"metadata.json").unlink(missing_ok=True)
     sim = PileSim(config.sim, device)
     g = torch.Generator(device="cpu").manual_seed(config.seed+101)
     started = time.perf_counter()
@@ -49,6 +52,7 @@ def generate(config, device, destination=None):
         print(f"Generated {first+b}/{config.trajectories} trajectories", flush=True)
     metadata = {"config": asdict(config), "splits": split_ids(config.trajectories, config.seed),
                 "generation_seconds": time.perf_counter()-started,
+                "simulator_version": SIMULATOR_VERSION,
                 "schema": "particles[T+1,N,2], pusher[T+1,2], actions[T,2]"}
     (root/"metadata.json").write_text(json.dumps(metadata, indent=2))
     return metadata

@@ -2,12 +2,39 @@
 
 Use the existing checkout; cloud tasks are isolated. Do not create worktrees unless explicitly requested.
 
-Python 3.11, uv, PyTorch, dataclasses/YAML. Source: `pile_wm/`; simulator: `pile_wm/sim/`; stage entry points: `scripts/`; reproducible presets: `configs/`; tests: `tests/`. Generated datasets, checkpoints, figures and metrics belong in ignored `artifacts/<config>/`.
+## Layout
 
-In this cloud environment export `UV_CACHE_DIR=/workspace/.cache/uv`, `UV_PYTHON_INSTALL_DIR=/workspace/.local/python`, and `TORCH_HOME=/workspace/.cache/torch` before using uv. Install with `uv sync --frozen`; test with `uv run pytest`. Generate simulator demo with `uv run python -m scripts.random_push --config configs/smoke.yaml`.
+- `pile_wm/sim/`: batched disc contacts, renderer, count-density targets.
+- `pile_wm/data.py`: state-only trajectories and disjoint trajectory splits.
+- `pile_wm/models/`: verified frozen DINOv2, detached decoder, frame-causal action-conditioned dynamics.
+- `pile_wm/training.py`, `evaluation.py`, `planning.py`: seeded experiments and real-state metrics.
+- `pile_wm/pipeline.py`, `reporting.py`: orchestration, figures, measured README generation.
+- `configs/{smoke,small,full}.yaml`: fully specified dataclass/YAML presets.
+- `scripts/`: stage entry points; `tests/`: offline unit tests.
+- `artifacts/<config>/`: ignored states, checkpoints, CSV/TensorBoard logs, raw metrics.
+- `reports/<config>/`: tracked measured results and figures, including source hashes.
 
-Generate state-only trajectories with `uv run python -m scripts.generate_data --config configs/smoke.yaml`; audit every state with `uv run python -m scripts.validate_data --config configs/smoke.yaml`. The YAML presets define smoke=32, small=500, full=5000 trajectories of 40 actions. Generation replaces files in the selected output directory. Data splits are by trajectory; never compute normalization statistics from validation/test data.
+## Commands
 
-Current blocker: the DINOv2 checkpoint host returned proxy HTTP 403. A domain addition is saved in environment settings but live access has not been established. Milestones 3 onward are pending; retry the official download after network settings are applied. Stop if weights remain unavailable; no substitute encoder is allowed. The current simulator/data commands are not an end-to-end world-model pipeline.
+Python 3.11 and uv. In this cloud environment export `UV_CACHE_DIR=/workspace/.cache/uv`, `UV_PYTHON_INSTALL_DIR=/workspace/.local/python`, `TORCH_HOME=/workspace/.cache/torch`, `MPLCONFIGDIR=/workspace/.cache/matplotlib`, and `XDG_CACHE_HOME=/workspace/.cache` (home is read-only).
 
-Seed all experiments from configuration; auto-select CUDA/MPS/CPU. Keep predictor and decoder optimization separate. Never replace DINOv2 in experiments; test doubles are for unit tests only. Record design choices and failures in DECISIONS.md. Commit each completed, tested milestone. Document only actually measured results, explicitly label their config, and leave full results pending. Never run full automatically.
+- Install: `uv sync --frozen`.
+- Tests: `uv run --frozen pytest -q` (no network or DINOv2 needed).
+- Complete CPU smoke: `uv run --frozen python -m scripts.pipeline --config configs/smoke.yaml`.
+- Fresh data: add `--regenerate`. Only compatible state datasets are reused; no latent cache.
+- GPU small: same pipeline with `configs/small.yaml`; run only if requested or GPU validation is in scope.
+- Never launch `full` automatically; it is an explicit user run.
+- Individual stages: `scripts.random_push`, `generate_data`, `validate_data`, `train_decoder`, `train_model`, `evaluate`, `plan`, and `report`, each with `--config`.
+- Real DINOv2 integration: `uv run --frozen python -m scripts.check_encoder`.
+
+## Conventions
+
+All random streams originate from configuration. Auto-select CUDA/MPS/CPU; GPU/MPS remain unverified until actually tested. Use frozen lockfiles. Do not add accounts or external logging. The official DINOv2 checkpoint is checksum-verified and strictly loaded; never replace it in experiments. Tiny encoders are test-only. Stop and report if official weights are unavailable.
+
+Action `a[t]` is the outgoing transition from state `s[t]`. A predictor input is three states and their three aligned outgoing actions. Rollouts use only the initial observed history and previous predictions. The decoder must always detach latent inputs, and its loss must never reach dynamics. Normalize using training data only.
+
+The model CEM cost has no simulator/state access; the oracle uses the same proposals and latent cost with real simulator transitions. Final scores always use true particle states. Preserve failed copy, shuffle, counterfactual, mass-drift, and planning controls; never tune a metric to hide failure. Report mean and standard error on paired episodes. Smoke is a tiny integration budget and does not establish model competence.
+
+Run stages sequentially on this CPU host to avoid PyTorch thread contention. The contact solver freezes converged environments independently; preserve batched/unbatched equivalence and tolerance tests. Bump `SIMULATOR_VERSION` when changes invalidate data. Interrupted generation must not retain a manifest suggesting completion.
+
+Record choices and failures in DECISIONS.md. Commit each tested milestone. README results are generated by `pile_wm/reporting.py`; change that template for durable documentation edits. Every empirical figure/number must come from a real, labeled run. Preserve pending small/full results. Flow matching is deferred until deterministic milestones pass their empirical controls.

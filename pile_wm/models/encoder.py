@@ -76,7 +76,8 @@ class Standardizer(nn.Module):
     def fit(self, batches):
         count, total, square = 0, None, None
         for batch in batches:
-            x = batch.detach().reshape(-1, batch.shape[-1]).double()
+            # Accumulate in CPU float64: MPS does not support float64 tensors.
+            x = batch.detach().reshape(-1, batch.shape[-1]).cpu().double()
             count += len(x)
             total = x.sum(0) if total is None else total+x.sum(0)
             square = x.square().sum(0) if square is None else square+x.square().sum(0)

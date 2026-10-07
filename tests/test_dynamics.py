@@ -46,3 +46,14 @@ def test_multistep_loss_backpropagates_and_parameter_budget():
     assert model.action[0].weight.grad.abs().sum() > 0
     real = LatentDynamics()
     assert 10_000_000 <= sum(p.numel() for p in real.parameters()) <= 25_000_000
+
+
+def test_evaluation_fastpath_preserves_frame_causality():
+    model = tiny()
+    history, actions = torch.randn(2, 3, 4, 8), torch.randn(2, 3, 2)
+    with torch.inference_mode():
+        original = model.predict_all(history, actions)
+        history[:, -1] *= 100
+        actions[:, -1] *= -100
+        changed = model.predict_all(history, actions)
+    torch.testing.assert_close(original[:, :2], changed[:, :2], rtol=0, atol=0)

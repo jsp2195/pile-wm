@@ -1,6 +1,7 @@
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import random
+import os
 
 import numpy as np
 import torch
@@ -89,6 +90,7 @@ def load_config(path):
 
 
 def setup(config):
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     random.seed(config.seed)
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)

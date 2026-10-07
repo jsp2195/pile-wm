@@ -4,6 +4,8 @@ import math
 import torch
 from pile_wm.config import SimConfig
 
+SIMULATOR_VERSION = 2
+
 
 @dataclass
 class State:
@@ -22,6 +24,10 @@ class PileSim:
         self.config = config or SimConfig()
         self.device = torch.device(device)
         n = self.config.particles
+        self.eye = torch.eye(n, dtype=torch.bool, device=self.device)[None]
+        index = torch.arange(n, device=self.device)
+        sign = torch.sign(index[:, None]-index[None, :]).float()
+        self.tie_direction = torch.stack((sign, torch.zeros_like(sign)), -1)[None]
 
     @torch.no_grad()
     def reset(self, batch_size=1, seed=0):
@@ -66,8 +72,9 @@ class PileSim:
         c = self.config
         n = x.shape[1]
         # Dense Jacobi contacts: simultaneous updates preserve batching equivalence.
-        eye = torch.eye(n, dtype=torch.bool, device=x.device)[None]
-        for _ in range(iterations):
+        active = torch.ones(len(x), dtype=torch.bool, device=x.device)
+        for iteration in range(iterations):
+            previous = x
             d = x - p[:, None]
             dist = d.norm(dim=-1, keepdim=True)
             fallback = torch.zeros_like(d)
@@ -76,15 +83,17 @@ class PileSim:
             x = x + direction * (c.particle_radius+c.pusher_radius-dist).clamp_min(0)
             d = x[:, :, None] - x[:, None, :]
             dist = d.norm(dim=-1, keepdim=True)
-            overlap = (2*c.particle_radius-dist).clamp_min(0).masked_fill(eye[..., None], 0)
+            overlap = (2*c.particle_radius-dist).clamp_min(0).masked_fill(self.eye[..., None], 0)
             # Stable antisymmetric tie-breaking for coincident particles.
-            index = torch.arange(n, device=x.device)
-            sign = torch.sign(index[:, None]-index[None, :])
-            fallback = torch.stack((sign, torch.zeros_like(sign)), -1)[None]
-            direction = torch.where(dist > 1e-9, d/dist.clamp_min(1e-9), fallback)
+            direction = torch.where(dist > 1e-9, d/dist.clamp_min(1e-9), self.tie_direction)
             contacts = (overlap > 0).sum(2).clamp_min(2)
             correction = (direction*overlap).sum(2) / contacts
             x = (x + correction).clamp(c.particle_radius, 1-c.particle_radius)
+            x = torch.where(active[:, None, None], x, previous)
+            if (iteration+1) % 4 == 0:
+                active = active & (self._penetration_by_env(x, p) > c.tolerance/8)
+                if not active.any():
+                    break
         return x
 
     @torch.no_grad()

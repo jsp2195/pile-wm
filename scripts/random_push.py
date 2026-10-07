@@ -12,6 +12,10 @@ def main():
     parser.add_argument("--config", default="configs/smoke.yaml")
     args = parser.parse_args()
     cfg = load_config(args.config)
+    make_gif(cfg)
+
+
+def make_gif(cfg):
     device = setup(cfg)
     sim = PileSim(cfg.sim, device)
     state = sim.reset(seed=cfg.seed)

@@ -38,3 +38,20 @@ def test_task_goals_are_geometric_and_reachable():
         replay = sim.step(replay, action)
     torch.testing.assert_close(goal.particles, replay.particles, rtol=0, atol=0)
     torch.testing.assert_close(goal.pusher, replay.pusher, rtol=0, atol=0)
+
+
+def test_oracle_cost_preserves_real_state():
+    from pile_wm.config import Config
+    from pile_wm.planning import OracleCost
+    class Encoder(nn.Module):
+        def forward(self, images):
+            return images.mean((2, 3))[:, None].expand(-1, 4, -1)
+    cfg = Config(sim=SimConfig(particles=8))
+    sim = PileSim(cfg.sim)
+    state = sim.reset(1, 9)
+    initial = state.clone()
+    evaluator = OracleCost(sim, state, Encoder(), nn.Identity(), torch.zeros(1, 4, 3), cfg)
+    costs = evaluator(torch.tensor([[[1., 0.], [1., 0.]], [[0., 1.], [0., 1.]]]))
+    assert costs.shape == (2,) and torch.isfinite(costs).all()
+    assert torch.equal(state.particles, initial.particles)
+    assert torch.equal(state.pusher, initial.pusher)
