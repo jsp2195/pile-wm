@@ -1,0 +1,8 @@
+name: smoke
+seed: 42
+device: auto
+threads: 4
+output: artifacts/smoke
+trajectories: 32
+steps: 40
+data_batch_size: 8
