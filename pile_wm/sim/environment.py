@@ -22,7 +22,6 @@ class PileSim:
         self.config = config or SimConfig()
         self.device = torch.device(device)
         n = self.config.particles
-        self.pairs = torch.triu_indices(n, n, 1, device=self.device)
 
     @torch.no_grad()
     def reset(self, batch_size=1, seed=0):
@@ -40,7 +39,28 @@ class PileSim:
             particles.append(torch.where(mask, uniform, cluster))
         x = torch.stack(particles).to(self.device).clamp(c.particle_radius, 1-c.particle_radius)
         p = (c.pusher_radius + (1-2*c.pusher_radius)*torch.rand(batch_size, 2, generator=g)).to(self.device)
-        return State(self._resolve(x, p, c.init_iterations), p)
+        return State(self._settle(self._resolve(x, p, c.init_iterations), p), p)
+
+    def _penetration_by_env(self, x, p):
+        c = self.config
+        dist = (x[:, :, None]-x[:, None, :]).norm(dim=-1)
+        dist.diagonal(dim1=-2, dim2=-1).fill_(float("inf"))
+        pp = (2*c.particle_radius-dist).clamp_min(0).amax((1, 2))
+        push = (c.particle_radius+c.pusher_radius-(x-p[:, None]).norm(dim=-1)).clamp_min(0).amax(1)
+        return torch.maximum(pp, push)
+
+    def _settle(self, x, p):
+        # Fixed iteration budgets alone fail on dense contacts. Freeze converged
+        # environments independently so results do not depend on batch neighbors.
+        for _ in range(20):
+            active = self._penetration_by_env(x, p) > self.config.tolerance/4
+            if not active.any():
+                return x
+            resolved = self._resolve(x, p, self.config.contact_iterations)
+            x = torch.where(active[:, None, None], resolved, x)
+        if (self._penetration_by_env(x, p) > self.config.tolerance).any():
+            raise RuntimeError("Contact solver did not converge; increase contact_iterations")
+        return x
 
     def _resolve(self, x, p, iterations):
         c = self.config
@@ -83,12 +103,7 @@ class PileSim:
         for i in range(count):
             p = p0 + (target-p0)*((i+1)/count)
             x = self._resolve(x, p, c.contact_iterations)
-        return State(x, target)
+        return State(self._settle(x, target), target)
 
     def penetration(self, state):
-        c = self.config
-        dist = torch.cdist(state.particles, state.particles)
-        dist.diagonal(dim1=-2, dim2=-1).fill_(float("inf"))
-        pp = (2*c.particle_radius-dist).clamp_min(0).amax()
-        push = (c.particle_radius+c.pusher_radius-(state.particles-state.pusher[:, None]).norm(dim=-1)).clamp_min(0).amax()
-        return torch.maximum(pp, push)
+        return self._penetration_by_env(state.particles, state.pusher).amax()

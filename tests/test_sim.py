@@ -49,3 +49,23 @@ def test_render_maps():
     maps = state_maps(state)
     torch.testing.assert_close(maps[:, 0].sum((1, 2)), torch.full((2,), 20.))
     torch.testing.assert_close(maps[:, 1].sum((1, 2)), torch.ones(2))
+
+
+def test_dense_contact_regression():
+    # Reproduces smoke trajectory 14, whose old fixed solver exceeded tolerance
+    # at step 17. These actions are fixed inputs, not generated output fixtures.
+    sim = PileSim()
+    state = sim.reset(1, 56)
+    actions = torch.tensor([
+        [-.19130339, .29946053], [-.38764793, -.08670110],
+        [-.14872544, -.19152810], [.70050609, -.37654850],
+        [1., -.15339737], [.62080252, -.62688518],
+        [.66893828, -.00821728], [.07429755, -.05906008],
+        [.74753362, .00587837], [1., .43636185],
+        [1., .08214089], [1., .05573837],
+        [.94450456, -.18179284], [.41031775, .38986087],
+        [.04674941, .60163635], [-.12164228, .76191628],
+        [.09371665, .46103036]])
+    for action in actions:
+        state = sim.step(state, action[None])
+        assert sim.penetration(state) <= sim.config.tolerance
