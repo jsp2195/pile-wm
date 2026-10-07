@@ -100,3 +100,83 @@ def train_decoder(config, device):
     save_json(root/"decoder_metrics.json", result)
     print(json.dumps(result, indent=2), flush=True)
     return result
+
+
+def sample_windows(dataset, batch, generator, context=3, future=3):
+    xs, ps, actions = [], [], []
+    for _ in range(batch):
+        trajectory = dataset[int(torch.randint(len(dataset), (), generator=generator))]
+        length = context+future
+        start = int(torch.randint(len(trajectory["particles"])-length+1, (), generator=generator))
+        xs.append(trajectory["particles"][start:start+length])
+        ps.append(trajectory["pusher"][start:start+length])
+        actions.append(trajectory["actions"][start:start+length-1])
+    return State(torch.stack(xs), torch.stack(ps)), torch.stack(actions)
+
+
+def train_model(config, device):
+    from pile_wm.models.dynamics import LatentDynamics, dynamics_loss
+    root = Path(config.output)
+    encoder, normalizer, _ = load_perception(config, device)
+    train = Trajectories(root/"data", "train")
+    val = Trajectories(root/"data", "val")
+    model = LatentDynamics(config.model).to(device)
+    parameters = sum(p.numel() for p in model.parameters())
+    if not 10_000_000 <= parameters <= 25_000_000:
+        raise ValueError(f"experiment model has {parameters} parameters, expected 10–25M")
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.train.learning_rate)
+    g = torch.Generator().manual_seed(config.seed+300)
+    started = time.perf_counter()
+    rows, encoding_seconds, dynamics_seconds = [], 0., 0.
+    with SummaryWriter(str(root/"tensorboard")) as writer:
+        for step in range(config.train.model_steps):
+            state, actions = sample_windows(train, config.train.batch_size, g)
+            b, t, n, _ = state.particles.shape
+            sync(device)
+            before = time.perf_counter()
+            z = encode_states(encoder, State(state.particles.reshape(b*t, n, 2), state.pusher.reshape(b*t, 2)).to(device), config, normalizer).reshape(b, t, 256, 384)
+            sync(device)
+            encoding_seconds += time.perf_counter()-before
+            before = time.perf_counter()
+            optimizer.zero_grad(set_to_none=True)
+            loss, teacher, multi = dynamics_loss(model, z, actions.to(device), config.train.multistep_weight)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
+            optimizer.step()
+            sync(device)
+            dynamics_seconds += time.perf_counter()-before
+            row = {"step": step, "loss": float(loss.detach()), "teacher_mse": float(teacher.detach()), "multistep_mse": float(multi.detach())}
+            rows.append(row)
+            for name, value in row.items():
+                if name != "step":
+                    writer.add_scalar("dynamics/"+name, value, step)
+            print(f"Predictor step {step+1}/{config.train.model_steps}: {row['loss']:.6f}", flush=True)
+    model.eval()
+    with torch.no_grad():
+        state, actions = sample_windows(val, config.train.batch_size, g)
+        b, t, n, _ = state.particles.shape
+        z = encode_states(encoder, State(state.particles.reshape(b*t, n, 2), state.pusher.reshape(b*t, 2)).to(device), config, normalizer).reshape(b, t, 256, 384)
+        val_loss, _, _ = dynamics_loss(model, z, actions.to(device), config.train.multistep_weight)
+    torch.save({"model": model.state_dict(), "config": asdict(config), "parameters": parameters,
+                "encoder_sha256": SHA256}, root/"dynamics.pt")
+    with (root/"model_training.csv").open("w") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = {"config": config.name, "parameters": parameters, "steps": len(rows),
+              "last_train_loss": rows[-1]["loss"], "validation_loss": float(val_loss),
+              "encoding_seconds": encoding_seconds, "dynamics_seconds": dynamics_seconds,
+              "latent_cache_used": False, "seconds": time.perf_counter()-started}
+    save_json(root/"training_metrics.json", result)
+    print(json.dumps(result, indent=2), flush=True)
+    return result
+
+
+def load_model(config, device):
+    from pile_wm.models.dynamics import LatentDynamics
+    saved = torch.load(Path(config.output)/"dynamics.pt", map_location=device, weights_only=True)
+    if saved["encoder_sha256"] != SHA256 or saved["config"]["model"] != asdict(config.model):
+        raise RuntimeError("Dynamics checkpoint/config mismatch")
+    model = LatentDynamics(config.model).to(device)
+    model.load_state_dict(saved["model"])
+    return model.eval()

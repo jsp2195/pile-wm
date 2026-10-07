@@ -6,3 +6,41 @@ output: artifacts/smoke
 trajectories: 32
 steps: 40
 data_batch_size: 8
+sim:
+  particles: 200
+  particle_radius: 0.012
+  pusher_radius: 0.04
+  max_displacement: 0.04
+  substeps: 5
+  contact_iterations: 40
+  init_iterations: 300
+  tolerance: 0.0005
+train:
+  statistics_frames: 32
+  decoder_steps: 20
+  model_steps: 4
+  batch_size: 1
+  encoder_batch_size: 8
+  learning_rate: 0.0001
+  decoder_learning_rate: 0.001
+  multistep_weight: 1.0
+model:
+  dim: 384
+  depth: 6
+  heads: 6
+  context: 3
+evaluation:
+  trajectories: 3
+  horizon: 30
+  counterfactual_k: 3
+  counterfactual_horizon: 5
+  occupancy_threshold: 0.1
+  shuffle_gap_threshold: 0.05
+planning:
+  episodes: 2
+  steps: 3
+  horizon: 2
+  population: 4
+  elites: 2
+  iterations: 1
+  chunk_size: 4

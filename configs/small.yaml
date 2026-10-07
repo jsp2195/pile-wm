@@ -6,3 +6,41 @@ output: artifacts/small
 trajectories: 500
 steps: 40
 data_batch_size: 16
+sim:
+  particles: 200
+  particle_radius: 0.012
+  pusher_radius: 0.04
+  max_displacement: 0.04
+  substeps: 5
+  contact_iterations: 40
+  init_iterations: 300
+  tolerance: 0.0005
+train:
+  statistics_frames: 512
+  decoder_steps: 1000
+  model_steps: 2000
+  batch_size: 8
+  encoder_batch_size: 32
+  learning_rate: 0.0001
+  decoder_learning_rate: 0.001
+  multistep_weight: 1.0
+model:
+  dim: 384
+  depth: 6
+  heads: 6
+  context: 3
+evaluation:
+  trajectories: 50
+  horizon: 30
+  counterfactual_k: 8
+  counterfactual_horizon: 10
+  occupancy_threshold: 0.1
+  shuffle_gap_threshold: 0.05
+planning:
+  episodes: 50
+  steps: 20
+  horizon: 8
+  population: 64
+  elites: 8
+  iterations: 4
+  chunk_size: 16
