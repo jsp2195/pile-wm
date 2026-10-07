@@ -1,0 +1,16 @@
+[project]
+name = "pile-wm"
+version = "0.1.0"
+description = "Action-conditioned latent world models for granular pile pushing"
+requires-python = ">=3.11,<3.12"
+dependencies = ["torch>=2.5", "torchvision>=0.20", "numpy>=1.26", "PyYAML>=6", "matplotlib>=3.8", "Pillow>=10", "tensorboard>=2.17", "einops>=0.8", "timm>=1.0"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
